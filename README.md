@@ -4,6 +4,10 @@ Paperforge is a private, browser-based PDF editor with an Adobe Reader-inspired
 workspace and a distinct visual identity. Files stay on the device; no document
 upload service or account is required.
 
+## Live app
+
+[Open Paperforge PDF Studio](https://hlaingbwaraung.github.io/paperforge-pdf-studio/)
+
 ## Features
 
 - Open local PDF files or use the built-in sample
