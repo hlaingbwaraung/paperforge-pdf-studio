@@ -18,7 +18,27 @@ const drawAnnotation = async (
   const pdfColor = rgb(color.r, color.g, color.b);
 
   if (annotation.type === "text") {
-    const lines = annotation.text.split("\n");
+    const maxWidth = Math.max(
+      40,
+      annotation.maxWidth ?? page.getWidth() - annotation.x - 12,
+    );
+    const lines = annotation.text.split("\n").flatMap((paragraph) => {
+      const words = paragraph.split(/\s+/).filter(Boolean);
+      if (words.length === 0) return [""];
+      const wrapped: string[] = [];
+      let current = words[0];
+      words.slice(1).forEach((word) => {
+        const candidate = `${current} ${word}`;
+        if (font.widthOfTextAtSize(candidate, annotation.fontSize) <= maxWidth) {
+          current = candidate;
+        } else {
+          wrapped.push(current);
+          current = word;
+        }
+      });
+      wrapped.push(current);
+      return wrapped;
+    });
     lines.forEach((line, index) => {
       page.drawText(line || " ", {
         x: annotation.x,

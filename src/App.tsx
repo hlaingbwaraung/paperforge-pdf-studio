@@ -79,6 +79,16 @@ const tools: Array<{
 
 const palette = ["#f2c94c", "#ff6b57", "#4f8cff", "#15a37d", "#17181c"];
 
+const defaultToolColors: Record<Tool, string> = {
+  select: "#17181c",
+  text: "#17181c",
+  highlight: "#f2c94c",
+  draw: "#ff6b57",
+  rectangle: "#4f8cff",
+  comment: "#ffb21c",
+  signature: "#17181c",
+};
+
 function IconButton({
   label,
   children,
@@ -212,7 +222,7 @@ export default function App() {
   const [fileName, setFileName] = useState("Untitled.pdf");
   const [fileSize, setFileSize] = useState(0);
   const [tool, setTool] = useState<Tool>("select");
-  const [color, setColor] = useState("#f2c94c");
+  const [toolColors, setToolColors] = useState(defaultToolColors);
   const [strokeWidth, setStrokeWidth] = useState(2.5);
   const [fontSize, setFontSize] = useState(15);
   const [zoom, setZoom] = useState(82);
@@ -239,6 +249,10 @@ export default function App() {
     currentPage?.annotations.find((annotation) => annotation.id === selectedId) ??
     null;
   const hasPages = pages.length > 0;
+  const color = toolColors[tool];
+  const setColor = (nextColor: string) => {
+    setToolColors((current) => ({ ...current, [tool]: nextColor }));
+  };
 
   useEffect(() => {
     setInspectorText(

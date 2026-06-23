@@ -123,12 +123,29 @@ const annotationBounds = (
 
   if (annotation.type === "text") {
     const [x, y] = viewport.convertToViewportPoint(annotation.x, annotation.y);
-    const width = Math.max(60, annotation.text.length * annotation.fontSize * 0.55);
+    const estimatedWidth = Math.max(
+      60,
+      Math.max(...annotation.text.split("\n").map((line) => line.length)) *
+        annotation.fontSize *
+        0.55,
+    );
+    const width = Math.min(
+      annotation.maxWidth ?? estimatedWidth,
+      estimatedWidth,
+    );
+    const estimatedLines = Math.max(
+      annotation.text.split("\n").length,
+      Math.ceil(estimatedWidth / Math.max(width, 1)),
+    );
     return {
       left: x - 4,
       top: y - 4,
       right: x + width * viewport.scale,
-      bottom: y + annotation.fontSize * 1.6 * viewport.scale,
+      bottom:
+        y +
+        annotation.fontSize *
+          (estimatedLines * 1.25 + 0.35) *
+          viewport.scale,
     };
   }
 
@@ -184,7 +201,27 @@ const drawAnnotation = (
     context.fillStyle = annotation.color;
     context.font = `${annotation.fontSize * viewport.scale}px "Inter", "Segoe UI", sans-serif`;
     context.textBaseline = "top";
-    annotation.text.split("\n").forEach((line, index) => {
+    const maxWidth =
+      (annotation.maxWidth ??
+        viewport.width / viewport.scale - annotation.x - 12) * viewport.scale;
+    const lines = annotation.text.split("\n").flatMap((paragraph) => {
+      const words = paragraph.split(/\s+/).filter(Boolean);
+      if (words.length === 0) return [""];
+      const wrapped: string[] = [];
+      let current = words[0];
+      words.slice(1).forEach((word) => {
+        const candidate = `${current} ${word}`;
+        if (context.measureText(candidate).width <= maxWidth) {
+          current = candidate;
+        } else {
+          wrapped.push(current);
+          current = word;
+        }
+      });
+      wrapped.push(current);
+      return wrapped;
+    });
+    lines.forEach((line, index) => {
       context.fillText(
         line,
         x,
@@ -480,21 +517,29 @@ export default function PdfCanvas({
     }
 
     if (tool === "text") {
+      const editorWidth = Math.min(320, viewport.width - 24);
+      const editorLeft = Math.min(local.x, viewport.width - editorWidth - 12);
+      const editorTop = Math.min(local.y, viewport.height - 112);
+      const [editorX, editorY] = viewport.convertToPdfPoint(
+        editorLeft,
+        editorTop,
+      );
       setInlineEditor({
         kind: "text",
-        left: local.x,
-        top: local.y,
-        point,
+        left: editorLeft,
+        top: editorTop,
+        point: { x: editorX, y: editorY },
         value: "",
       });
       return;
     }
 
     if (tool === "comment") {
+      const editorWidth = Math.min(260, viewport.width - 24);
       setInlineEditor({
         kind: "comment",
-        left: local.x,
-        top: local.y,
+        left: Math.min(local.x, viewport.width - editorWidth - 12),
+        top: Math.min(local.y, viewport.height - 154),
         point,
         value: "",
       });
@@ -604,6 +649,7 @@ export default function PdfCanvas({
         y: inlineEditor.point.y,
         text: inlineEditor.value.trim(),
         fontSize,
+        maxWidth: Math.max(60, page.width - inlineEditor.point.x - 12),
         color,
         createdAt: Date.now(),
       });
@@ -636,35 +682,73 @@ export default function PdfCanvas({
         aria-label={`PDF page ${page.sourceIndex === null ? "blank" : page.sourceIndex + 1} editing canvas`}
       />
       {inlineEditor && (
-        <textarea
-          autoFocus
-          className={`canvas-text-editor ${
+        <div
+          className={`canvas-inline-editor ${
             inlineEditor.kind === "comment" ? "comment-editor" : ""
           }`}
           style={{
             left: inlineEditor.left,
             top: inlineEditor.top,
-            color: inlineEditor.kind === "comment" ? "#2b1a00" : color,
-            fontSize:
-              inlineEditor.kind === "comment" ? 13 : fontSize * scale,
           }}
-          value={inlineEditor.value}
-          placeholder={
-            inlineEditor.kind === "comment"
-              ? "Write a comment..."
-              : "Type here..."
-          }
-          onChange={(event) =>
-            setInlineEditor({ ...inlineEditor, value: event.target.value })
-          }
-          onBlur={commitInlineEditor}
-          onKeyDown={(event) => {
-            if (event.key === "Escape") setInlineEditor(null);
-            if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-              commitInlineEditor();
+        >
+          <textarea
+            autoFocus
+            className="canvas-text-editor"
+            style={{
+              color: inlineEditor.kind === "comment" ? "#2b1a00" : color,
+              fontSize:
+                inlineEditor.kind === "comment" ? 13 : fontSize * scale,
+            }}
+            value={inlineEditor.value}
+            placeholder={
+              inlineEditor.kind === "comment"
+                ? "Write a comment..."
+                : "Type here..."
             }
-          }}
-        />
+            onChange={(event) =>
+              setInlineEditor({ ...inlineEditor, value: event.target.value })
+            }
+            onBlur={(event) => {
+              if (event.currentTarget.parentElement?.contains(event.relatedTarget)) {
+                return;
+              }
+              commitInlineEditor();
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                setInlineEditor(null);
+              }
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                commitInlineEditor();
+              }
+            }}
+          />
+          <div className="inline-editor-actions">
+            <span>
+              {inlineEditor.kind === "text"
+                ? "Enter to add | Shift+Enter for a new line"
+                : "Enter to save comment"}
+            </span>
+            <button
+              type="button"
+              onPointerDown={(event) => event.preventDefault()}
+              onClick={() => setInlineEditor(null)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="inline-done"
+              disabled={!inlineEditor.value.trim()}
+              onPointerDown={(event) => event.preventDefault()}
+              onClick={commitInlineEditor}
+            >
+              Done
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );

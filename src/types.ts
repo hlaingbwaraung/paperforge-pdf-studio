@@ -25,6 +25,7 @@ export type TextAnnotation = AnnotationBase & {
   y: number;
   text: string;
   fontSize: number;
+  maxWidth?: number;
 };
 
 export type ShapeAnnotation = AnnotationBase & {
