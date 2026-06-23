@@ -16,15 +16,11 @@ import {
   FilePlus2,
   FileText,
   Highlighter,
-  ImagePlus,
-  LayoutPanelLeft,
   MessageSquareText,
-  Minus,
   MousePointer2,
   PanelRightClose,
   PanelRightOpen,
   PenLine,
-  Plus,
   Printer,
   Redo2,
   RotateCw,
@@ -227,11 +223,14 @@ export default function App() {
   const [query, setQuery] = useState("");
   const [textIndex, setTextIndex] = useState<string[]>([]);
   const [searchCursor, setSearchCursor] = useState(0);
-  const [rightPanelOpen, setRightPanelOpen] = useState(true);
+  const [rightPanelOpen, setRightPanelOpen] = useState(
+    () => window.innerWidth > 900,
+  );
   const [draggingFile, setDraggingFile] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
+  const [inspectorText, setInspectorText] = useState("");
   const [, forceHistoryRender] = useState(0);
 
   const currentPageIndex = pages.findIndex((page) => page.id === currentPageId);
@@ -239,6 +238,16 @@ export default function App() {
   const selectedAnnotation =
     currentPage?.annotations.find((annotation) => annotation.id === selectedId) ??
     null;
+  const hasPages = pages.length > 0;
+
+  useEffect(() => {
+    setInspectorText(
+      selectedAnnotation?.type === "text" ||
+        selectedAnnotation?.type === "comment"
+        ? selectedAnnotation.text
+        : "",
+    );
+  }, [selectedAnnotation?.id]);
 
   const showToast = useCallback(
     (message: string, tone: ToastState["tone"] = "neutral") => {
@@ -323,7 +332,9 @@ export default function App() {
         setFileName(name.endsWith(".pdf") ? name : `${name}.pdf`);
         setFileSize(bytes.byteLength);
         setZoom(82);
+        setTool("select");
         setQuery("");
+        setSearchOpen(false);
         setTextIndex([]);
         historyPast.current = [];
         historyFuture.current = [];
@@ -368,7 +379,10 @@ export default function App() {
   );
 
   const exportPdf = useCallback(async () => {
-    if (!sourceBytes || pages.length === 0) return null;
+    if (pages.length === 0) {
+      showToast("Open a PDF or add a blank page first.", "warning");
+      return null;
+    }
     setIsExporting(true);
     try {
       const output = await exportEditedPdf({
@@ -395,30 +409,49 @@ export default function App() {
   }, [exportPdf, fileName, showToast]);
 
   const printPdf = useCallback(async () => {
-    const printWindow = window.open("", "_blank");
-    if (!printWindow) {
-      showToast("Allow pop-ups to print this document.", "warning");
+    if (pages.length === 0) {
+      showToast("Open a PDF or add a blank page first.", "warning");
       return;
     }
-    printWindow.document.write(
-      "<p style='font:16px system-ui;padding:24px'>Preparing PDF...</p>",
-    );
     const bytes = await exportPdf();
-    if (!bytes) {
-      printWindow.close();
-      return;
-    }
+    if (!bytes) return;
     const url = URL.createObjectURL(
       new Blob([bytes as BlobPart], { type: "application/pdf" }),
     );
-    printWindow.location.href = url;
-    window.setTimeout(() => {
-      printWindow.print();
-      window.setTimeout(() => URL.revokeObjectURL(url), 5000);
-    }, 1200);
-  }, [exportPdf, showToast]);
+    const frame = window.document.createElement("iframe");
+    frame.title = "Print PDF";
+    frame.style.position = "fixed";
+    frame.style.width = "1px";
+    frame.style.height = "1px";
+    frame.style.right = "0";
+    frame.style.bottom = "0";
+    frame.style.border = "0";
+    frame.style.opacity = "0";
+
+    let printStarted = false;
+    const startPrint = () => {
+      if (printStarted) return;
+      printStarted = true;
+      frame.contentWindow?.focus();
+      frame.contentWindow?.print();
+      showToast("Print dialog prepared", "success");
+      window.setTimeout(() => {
+        frame.remove();
+        URL.revokeObjectURL(url);
+      }, 60_000);
+    };
+
+    frame.onload = startPrint;
+    frame.src = url;
+    window.document.body.appendChild(frame);
+    window.setTimeout(startPrint, 1500);
+  }, [exportPdf, pages.length, showToast]);
 
   const selectTool = (nextTool: Tool) => {
+    if (!currentPage) {
+      showToast("Open a PDF or add a blank page to use editing tools.", "warning");
+      return;
+    }
     if (nextTool === "signature" && !signatureData) {
       setSignatureOpen(true);
       return;
@@ -636,133 +669,12 @@ export default function App() {
     setFileName("Untitled.pdf");
     setFileSize(0);
     setTextIndex([]);
+    setQuery("");
+    setSearchOpen(false);
+    setTool("select");
     historyPast.current = [];
     historyFuture.current = [];
   };
-
-  if (!sourceBytes || pages.length === 0) {
-    return (
-      <main
-        className={`welcome-screen ${draggingFile ? "drag-active" : ""}`}
-        onDragEnter={(event) => {
-          event.preventDefault();
-          setDraggingFile(true);
-        }}
-        onDragOver={(event) => event.preventDefault()}
-        onDragLeave={(event) => {
-          if (event.currentTarget === event.target) setDraggingFile(false);
-        }}
-        onDrop={(event) => {
-          event.preventDefault();
-          setDraggingFile(false);
-          const file = event.dataTransfer.files[0];
-          if (file) void openFile(file);
-        }}
-      >
-        <input
-          ref={fileInputRef}
-          className="sr-only"
-          type="file"
-          accept=".pdf,application/pdf"
-          onChange={(event) => {
-            const file = event.target.files?.[0];
-            if (file) void openFile(file);
-            event.target.value = "";
-          }}
-        />
-        <nav className="welcome-nav">
-          <div className="brand-lockup">
-            <span className="brand-mark">
-              <span />
-            </span>
-            <span>Paperforge</span>
-          </div>
-          <span className="privacy-pill">
-            <span className="status-dot" />
-            Private, in-browser editing
-          </span>
-        </nav>
-
-        <section className="welcome-content">
-          <div className="welcome-copy">
-            <span className="eyebrow">PDF WORKSPACE / 01</span>
-            <h1>
-              Make the document
-              <br />
-              <em>yours.</em>
-            </h1>
-            <p>
-              A focused PDF editor for reviewing, signing, reorganizing, and
-              exporting documents without sending them to a server.
-            </p>
-            <div className="welcome-actions">
-              <button
-                className="button button-primary button-large"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={isLoading}
-              >
-                <Upload size={18} />
-                {isLoading ? "Opening..." : "Open a PDF"}
-              </button>
-              <button
-                className="button button-secondary button-large"
-                disabled={isLoading}
-                onClick={async () => {
-                  const bytes = await createDemoPdf();
-                  await loadPdfBytes(bytes, "Paperforge-demo.pdf");
-                }}
-              >
-                <FileText size={18} />
-                Try a sample
-              </button>
-            </div>
-            <div className="feature-row">
-              <span>Annotate</span>
-              <span>Sign</span>
-              <span>Reorder</span>
-              <span>Export</span>
-            </div>
-          </div>
-
-          <button
-            className="drop-composition"
-            onClick={() => fileInputRef.current?.click()}
-            aria-label="Choose a PDF file"
-          >
-            <span className="composition-grid" />
-            <span className="floating-tag tag-one">PDF</span>
-            <span className="floating-tag tag-two">LOCAL</span>
-            <span className="paper-preview">
-              <span className="paper-header" />
-              <span className="paper-title" />
-              <span className="paper-line long" />
-              <span className="paper-line" />
-              <span className="paper-line short" />
-              <span className="paper-highlight" />
-              <span className="paper-signature">Hlaing</span>
-            </span>
-            <span className="drop-cta">
-              <ImagePlus size={18} />
-              Drop PDF here
-            </span>
-          </button>
-        </section>
-        <footer className="welcome-footer">
-          <span>No account required</span>
-          <span>Files never leave this device</span>
-        </footer>
-        {draggingFile && (
-          <div className="drop-overlay">
-            <Upload size={30} />
-            <strong>Release to open PDF</strong>
-          </div>
-        )}
-        {toast && (
-          <div className={`toast ${toast.tone}`}>{toast.message}</div>
-        )}
-      </main>
-    );
-  }
 
   return (
     <main
@@ -796,7 +708,8 @@ export default function App() {
           <button
             className="brand-lockup compact"
             onClick={newDocument}
-            title="Home"
+            title="Start a new workspace"
+            aria-label="Start a new workspace"
           >
             <span className="brand-mark">
               <span />
@@ -807,21 +720,30 @@ export default function App() {
           <div className="file-identity">
             <span className="file-name">{fileName}</span>
             <span className="file-meta">
-              {pages.length} {pages.length === 1 ? "page" : "pages"} ·{" "}
-              {formatFileSize(fileSize)}
+              {hasPages
+                ? `${pages.length} ${pages.length === 1 ? "page" : "pages"} | ${formatFileSize(fileSize)}`
+                : "No document loaded"}
             </span>
           </div>
         </div>
         <div className="topbar-actions">
-          <IconButton label="Search document" onClick={() => setSearchOpen(true)}>
+          <IconButton
+            label="Search document"
+            disabled={!sourceBytes || isLoading}
+            onClick={() => setSearchOpen(true)}
+          >
             <Search size={18} />
           </IconButton>
-          <IconButton label="Print" onClick={() => void printPdf()}>
+          <IconButton
+            label="Print"
+            disabled={!hasPages || isLoading || isExporting}
+            onClick={() => void printPdf()}
+          >
             <Printer size={18} />
           </IconButton>
           <button
             className="button button-primary save-button"
-            disabled={isExporting}
+            disabled={!hasPages || isLoading || isExporting}
             onClick={() => void downloadPdf()}
           >
             {isExporting ? (
@@ -838,12 +760,17 @@ export default function App() {
         <div className="command-group">
           <button
             className="button button-quiet"
+            disabled={isLoading}
             onClick={() => fileInputRef.current?.click()}
           >
             <Upload size={16} />
             Open
           </button>
-          <button className="button button-quiet" onClick={() => void downloadPdf()}>
+          <button
+            className="button button-quiet"
+            disabled={!hasPages || isLoading || isExporting}
+            onClick={() => void downloadPdf()}
+          >
             <Save size={16} />
             Save as
           </button>
@@ -856,6 +783,7 @@ export default function App() {
               <button
                 key={entry.id}
                 className={`tool-button ${tool === entry.id ? "active" : ""}`}
+                disabled={!currentPage || isLoading}
                 onClick={() => selectTool(entry.id)}
                 title={`${entry.label}${entry.shortcut ? ` (${entry.shortcut})` : ""}`}
               >
@@ -918,17 +846,24 @@ export default function App() {
             </IconButton>
             <IconButton
               label="Move page down"
-              disabled={currentPageIndex >= pages.length - 1}
+              disabled={
+                currentPageIndex < 0 || currentPageIndex >= pages.length - 1
+              }
               onClick={() => movePage(1)}
             >
               <ArrowDown size={16} />
             </IconButton>
-            <IconButton label="Rotate page" onClick={rotatePage}>
+            <IconButton
+              label="Rotate page"
+              disabled={!currentPage}
+              onClick={rotatePage}
+            >
               <RotateCw size={16} />
             </IconButton>
             <IconButton
               label="Delete page"
               className="danger"
+              disabled={pages.length <= 1}
               onClick={deletePage}
             >
               <Trash2 size={16} />
@@ -964,7 +899,9 @@ export default function App() {
         <section className="document-stage">
           <div className="stage-status">
             <span>
-              Page {currentPageIndex + 1} of {pages.length}
+              {currentPage
+                ? `Page ${currentPageIndex + 1} of ${pages.length}`
+                : "Workshop ready"}
             </span>
             <span className="privacy-note">
               <span className="status-dot" />
@@ -972,7 +909,7 @@ export default function App() {
             </span>
           </div>
           <div className="viewer-scroll" ref={viewerRef}>
-            {currentPage && (
+            {currentPage ? (
               <PdfCanvas
                 document={document}
                 page={currentPage}
@@ -986,9 +923,53 @@ export default function App() {
                 onSelect={setSelectedId}
                 onAddAnnotation={addAnnotation}
               />
+            ) : (
+              <section className="workshop-empty" aria-labelledby="workshop-title">
+                <span className="empty-document-icon">
+                  <FileText size={28} />
+                </span>
+                <span className="eyebrow">PDF workshop</span>
+                <h1 id="workshop-title">Open a document to begin</h1>
+                <p>
+                  Drop a PDF anywhere in this workshop, open one from your
+                  computer, or start with a clean blank page.
+                </p>
+                <div className="workshop-empty-actions">
+                  <button
+                    className="button button-primary"
+                    disabled={isLoading}
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <Upload size={17} />
+                    Open PDF
+                  </button>
+                  <button
+                    className="button button-secondary"
+                    disabled={isLoading}
+                    onClick={addBlankPage}
+                  >
+                    <FilePlus2 size={17} />
+                    Blank page
+                  </button>
+                </div>
+                <button
+                  className="sample-link"
+                  disabled={isLoading}
+                  onClick={async () => {
+                    const bytes = await createDemoPdf();
+                    await loadPdfBytes(bytes, "Paperforge-demo.pdf");
+                  }}
+                >
+                  Use the sample document
+                </button>
+                <span className="empty-privacy">
+                  <span className="status-dot" />
+                  Files stay in this browser
+                </span>
+              </section>
             )}
           </div>
-          <div className="view-controls">
+          {currentPage && <div className="view-controls">
             <IconButton
               label="Previous page"
               disabled={currentPageIndex <= 0}
@@ -1036,7 +1017,13 @@ export default function App() {
             <button className="fit-button" onClick={() => fitView("width")}>
               Fit width
             </button>
-          </div>
+          </div>}
+          {isLoading && (
+            <div className="stage-loading" role="status">
+              <span className="spinner dark" />
+              Opening PDF...
+            </div>
+          )}
         </section>
 
         {rightPanelOpen && (
@@ -1088,10 +1075,24 @@ export default function App() {
                   <label className="field">
                     <span>Content</span>
                     <textarea
-                      value={selectedAnnotation.text}
-                      onChange={(event) =>
-                        updateSelected({ text: event.target.value })
-                      }
+                      value={inspectorText}
+                      onChange={(event) => setInspectorText(event.target.value)}
+                      onBlur={() => {
+                        const next = inspectorText.trim();
+                        if (next && next !== selectedAnnotation.text) {
+                          updateSelected({ text: next });
+                        } else if (!next) {
+                          setInspectorText(selectedAnnotation.text);
+                        }
+                      }}
+                      onKeyDown={(event) => {
+                        if (
+                          (event.metaKey || event.ctrlKey) &&
+                          event.key === "Enter"
+                        ) {
+                          event.currentTarget.blur();
+                        }
+                      }}
                     />
                   </label>
                 )}
@@ -1252,7 +1253,7 @@ export default function App() {
                 )}
 
                 <div className="quick-actions">
-                  <button onClick={rotatePage}>
+                  <button disabled={!currentPage} onClick={rotatePage}>
                     <RotateCw size={17} />
                     Rotate page
                   </button>
@@ -1296,7 +1297,10 @@ export default function App() {
                     <div className="empty-comments">
                       <MessageSquareText size={22} />
                       <p>No comments on this page.</p>
-                      <button onClick={() => setTool("comment")}>
+                      <button
+                        disabled={!currentPage}
+                        onClick={() => selectTool("comment")}
+                      >
                         Add a comment
                       </button>
                     </div>

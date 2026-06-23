@@ -39,7 +39,8 @@ type Draft =
       end: PdfPoint;
     };
 
-type TextEditor = {
+type InlineEditor = {
+  kind: "text" | "comment";
   left: number;
   top: number;
   point: PdfPoint;
@@ -242,7 +243,7 @@ export default function PdfCanvas({
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const [viewport, setViewport] = useState<ViewportLike | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
-  const [textEditor, setTextEditor] = useState<TextEditor | null>(null);
+  const [inlineEditor, setInlineEditor] = useState<InlineEditor | null>(null);
   const [signatureImages, setSignatureImages] = useState<
     Record<string, HTMLImageElement>
   >({});
@@ -341,7 +342,6 @@ export default function PdfCanvas({
     context.clearRect(0, 0, viewport.width, viewport.height);
 
     page.annotations.forEach((annotation) => {
-      drawAnnotation(context, annotation, viewport, annotation.id === selectedId);
       if (annotation.type === "signature") {
         const image = signatureImages[annotation.id];
         if (image) {
@@ -355,6 +355,7 @@ export default function PdfCanvas({
           );
         }
       }
+      drawAnnotation(context, annotation, viewport, annotation.id === selectedId);
     });
 
     if (draft?.type === "draw") {
@@ -479,7 +480,8 @@ export default function PdfCanvas({
     }
 
     if (tool === "text") {
-      setTextEditor({
+      setInlineEditor({
+        kind: "text",
         left: local.x,
         top: local.y,
         point,
@@ -489,19 +491,13 @@ export default function PdfCanvas({
     }
 
     if (tool === "comment") {
-      const text = window.prompt("Add your comment");
-      if (text?.trim()) {
-        onAddAnnotation({
-          id: makeId("comment"),
-          pageId: page.id,
-          type: "comment",
-          x: point.x,
-          y: point.y,
-          text: text.trim(),
-          color: "#ffb21c",
-          createdAt: Date.now(),
-        });
-      }
+      setInlineEditor({
+        kind: "comment",
+        left: local.x,
+        top: local.y,
+        point,
+        value: "",
+      });
       return;
     }
 
@@ -582,23 +578,37 @@ export default function PdfCanvas({
     setDraft(null);
   };
 
-  const commitText = () => {
-    if (!textEditor?.value.trim()) {
-      setTextEditor(null);
+  const commitInlineEditor = () => {
+    if (!inlineEditor?.value.trim()) {
+      setInlineEditor(null);
       return;
     }
-    onAddAnnotation({
-      id: makeId("text"),
-      pageId: page.id,
-      type: "text",
-      x: textEditor.point.x,
-      y: textEditor.point.y,
-      text: textEditor.value.trim(),
-      fontSize,
-      color,
-      createdAt: Date.now(),
-    });
-    setTextEditor(null);
+
+    if (inlineEditor.kind === "comment") {
+      onAddAnnotation({
+        id: makeId("comment"),
+        pageId: page.id,
+        type: "comment",
+        x: inlineEditor.point.x,
+        y: inlineEditor.point.y,
+        text: inlineEditor.value.trim(),
+        color: "#ffb21c",
+        createdAt: Date.now(),
+      });
+    } else {
+      onAddAnnotation({
+        id: makeId("text"),
+        pageId: page.id,
+        type: "text",
+        x: inlineEditor.point.x,
+        y: inlineEditor.point.y,
+        text: inlineEditor.value.trim(),
+        fontSize,
+        color,
+        createdAt: Date.now(),
+      });
+    }
+    setInlineEditor(null);
   };
 
   const cursorClass = useMemo(() => {
@@ -625,26 +635,33 @@ export default function PdfCanvas({
         onPointerCancel={() => setDraft(null)}
         aria-label={`PDF page ${page.sourceIndex === null ? "blank" : page.sourceIndex + 1} editing canvas`}
       />
-      {textEditor && (
+      {inlineEditor && (
         <textarea
           autoFocus
-          className="canvas-text-editor"
+          className={`canvas-text-editor ${
+            inlineEditor.kind === "comment" ? "comment-editor" : ""
+          }`}
           style={{
-            left: textEditor.left,
-            top: textEditor.top,
-            color,
-            fontSize: fontSize * scale,
+            left: inlineEditor.left,
+            top: inlineEditor.top,
+            color: inlineEditor.kind === "comment" ? "#2b1a00" : color,
+            fontSize:
+              inlineEditor.kind === "comment" ? 13 : fontSize * scale,
           }}
-          value={textEditor.value}
-          placeholder="Type here..."
-          onChange={(event) =>
-            setTextEditor({ ...textEditor, value: event.target.value })
+          value={inlineEditor.value}
+          placeholder={
+            inlineEditor.kind === "comment"
+              ? "Write a comment..."
+              : "Type here..."
           }
-          onBlur={commitText}
+          onChange={(event) =>
+            setInlineEditor({ ...inlineEditor, value: event.target.value })
+          }
+          onBlur={commitInlineEditor}
           onKeyDown={(event) => {
-            if (event.key === "Escape") setTextEditor(null);
+            if (event.key === "Escape") setInlineEditor(null);
             if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-              commitText();
+              commitInlineEditor();
             }
           }}
         />

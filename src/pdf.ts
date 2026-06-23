@@ -3,7 +3,7 @@ import type { Annotation, EditorPage } from "./types";
 import { hexToRgb } from "./utils";
 
 type ExportOptions = {
-  sourceBytes: Uint8Array;
+  sourceBytes?: Uint8Array | null;
   pages: EditorPage[];
   title: string;
 };
@@ -105,7 +105,9 @@ export const exportEditedPdf = async ({
   pages,
   title,
 }: ExportOptions) => {
-  const source = await PDFDocument.load(sourceBytes, { ignoreEncryption: true });
+  const source = sourceBytes
+    ? await PDFDocument.load(sourceBytes, { ignoreEncryption: true })
+    : null;
   const output = await PDFDocument.create();
   const font = await output.embedFont(StandardFonts.Helvetica);
 
@@ -119,6 +121,9 @@ export const exportEditedPdf = async ({
     if (editorPage.sourceIndex === null) {
       page = output.addPage([editorPage.width, editorPage.height]);
     } else {
+      if (!source) {
+        throw new Error("A source PDF is required for imported pages.");
+      }
       const [copiedPage] = await output.copyPages(source, [editorPage.sourceIndex]);
       page = output.addPage(copiedPage);
     }
